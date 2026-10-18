@@ -165,7 +165,7 @@
         <thead><tr><th>種類</th><th class="num">一致</th><th class="num">記録数</th><th class="num">一致率</th></tr></thead>
         <tbody id="evalBody"></tbody>
       </table>
-      <p class="total" style="margin:0;"><strong id="evalOverall" style="font-size:32px;">–</strong><span id="evalJudge">全体の正解率（目標80%）</span></p>
+      <p class="total" style="margin:0;"><strong id="evalOverall" style="font-size:32px;">–</strong><span id="evalJudge">全体の一致率（目標80%）</span></p>
     </section>
   </aside>
 
@@ -374,8 +374,8 @@ function renderEval() {
   const ok = rows.reduce((a, r) => a + r.ok, 0), all = rows.reduce((a, r) => a + r.total, 0);
   const rate = all ? Math.round(ok / all * 100) : null;
   $("evalOverall").textContent = rate === null ? "–" : rate + "%";
-  $("evalJudge").textContent = rate === null ? "全体の正解率（目標80%）"
-    : `全体の正解率（${evalLog.length}枚・目標80%に${rate >= 80 ? "到達" : "未到達"}）`;
+  $("evalJudge").textContent = rate === null ? "全体の一致率（目標80%）"
+    : `全体の一致率（${evalLog.length}枚・目標80%に${rate >= 80 ? "到達" : "未到達"}）`;
 }
 renderEval();
 
