@@ -155,17 +155,17 @@
 
     <section class="controls" aria-labelledby="evalTitle">
       <h2 id="evalTitle" style="font-size:18px;margin:8px 0 0;">評価：正解と比べる</h2>
-      <p class="empty" style="margin:0;">机の上の実際の個数を入れて「記録」を押すと、AIの数と比べて正解率を出します。</p>
+      <p class="empty" style="margin:0;">机の上の実際の個数を入れて「この画面を記録」を押すと、AIが数えた個数とぴったり同じだったかを種類ごとに数えます。</p>
       <div class="row" id="truthInputs"></div>
       <div class="row">
         <button id="evalBtn">この画面を記録</button>
         <button id="evalCsvBtn">評価結果をCSVで保存</button>
       </div>
       <table>
-        <thead><tr><th>種類</th><th class="num">正解</th><th class="num">試行</th><th class="num">正解率</th></tr></thead>
+        <thead><tr><th>種類</th><th class="num">一致</th><th class="num">記録数</th><th class="num">一致率</th></tr></thead>
         <tbody id="evalBody"></tbody>
       </table>
-      <p class="total" style="margin:0;"><strong id="evalOverall" style="font-size:32px;">–</strong><span id="evalJudge">全体の正解率（目標80%）</span></p>
+      <p class="total" style="margin:0;"><strong id="evalOverall" style="font-size:32px;">–</strong><span id="evalJudge">全体の一致率（目標80%）</span></p>
     </section>
   </aside>
 
@@ -374,8 +374,8 @@ function renderEval() {
   const ok = rows.reduce((a, r) => a + r.ok, 0), all = rows.reduce((a, r) => a + r.total, 0);
   const rate = all ? Math.round(ok / all * 100) : null;
   $("evalOverall").textContent = rate === null ? "–" : rate + "%";
-  $("evalJudge").textContent = rate === null ? "全体の正解率（目標80%）"
-    : `全体の正解率（${evalLog.length}枚・目標80%に${rate >= 80 ? "到達" : "未到達"}）`;
+  $("evalJudge").textContent = rate === null ? "全体の一致率（目標80%）"
+    : `全体の一致率（${evalLog.length}枚・目標80%に${rate >= 80 ? "到達" : "未到達"}）`;
 }
 renderEval();
 
