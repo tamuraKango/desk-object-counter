@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>リアルタイム物体カウンター</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #E6EEF1;
+    --surface: #FFFFFF;
+    --line: #C5D3D9;
+    --text: #13212B;
+    --muted: #4F6573;
+    --signal: #C99A00;
+    --signal-ink: #13212B;
+    --box: #F2C230;
+    --danger: #B3261E;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #13212B;
+      --surface: #1D3140;
+      --line: #2E4657;
+      --text: #EAF2F5;
+      --muted: #9AB0BC;
+      --signal: #F2C230;
+      --signal-ink: #13212B;
+      --danger: #FF8A80;
+    }
+  }
+  *, *::before, *::after { box-sizing: inherit; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+    display: grid;
+    grid-template-rows: 1fr auto;
+  }
+  @media (min-width: 900px) {
+    body { grid-template-rows: none; grid-template-columns: 1fr 340px; }
+  }
+
+  .stage { position: relative; background: #000; overflow: hidden; min-height: 50vh; }
+  video, canvas#overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+  video { object-fit: contain; }
+  .hud {
+    position: absolute; top: 12px; left: 12px; right: 12px;
+    display: flex; justify-content: space-between; gap: 8px; pointer-events: none;
+  }
+  .pill {
+    background: rgba(19, 33, 43, .72); color: #EAF2F5;
+    border-radius: 999px; padding: 6px 12px; font-size: 13px;
+  }
+  .start {
+    position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+    padding: 24px; color: #EAF2F5;
+    background: radial-gradient(circle at 50% 40%, #1D3140, #0A1218);
+  }
+  .start h1 { font-size: clamp(24px, 6vw, 40px); margin: 0 0 8px; line-height: 1.3; }
+  .start p { margin: 0 auto 24px; max-width: 30em; color: #9AB0BC; line-height: 1.8; }
+  .start .note { font-size: 13px; margin-top: 16px; margin-bottom: 0; }
+
+  button, select {
+    font: inherit; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--text); padding: 10px 14px; cursor: pointer;
+  }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+  .primary { background: #F2C230; color: #13212B; border: none; font-weight: 700; font-size: 18px; padding: 14px 32px; }
+  button:disabled { opacity: .5; cursor: progress; }
+
+  .panel { background: var(--bg); padding: 16px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; max-height: 50vh; }
+  @media (min-width: 900px) { .panel { max-height: none; border-left: 1px solid var(--line); } }
+  .total { display: flex; align-items: baseline; gap: 10px; }
+  .total strong { font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
+  .total span { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 400; font-size: 13px; }
+  td.num, th.num { text-align: right; }
+  .empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
+  .controls { display: grid; gap: 12px; }
+  .controls label { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+  input[type="range"] { width: 100%; accent-color: var(--signal); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row button { flex: 1 1 auto; }
+  .truth { display: grid; gap: 4px; font-size: 14px; color: var(--muted); flex: 1 1 80px; }
+  .truth input { font: inherit; width: 100%; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); }
+  .error { color: var(--danger); font-size: 14px; line-height: 1.6; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+  <main class="stage" id="stage">
+    <video id="video" playsinline muted></video>
+    <canvas id="overlay"></canvas>
+    <div class="hud">
+      <span class="pill" id="fps">– fps</span>
+      <span class="pill" id="status">待機中</span>
+    </div>
+    <div class="start" id="startScreen">
+      <div>
+        <h1>カメラに映ったモノを<br>その場で数えます</h1>
+        <p>人・車・犬・椅子など約80種類を、端末の中だけで識別します。映像はどこにも送信されません。</p>
+        <button class="primary" id="startBtn">カメラを起動</button>
+        <p class="note" id="startNote">初回はAIモデル（約4MB）の読み込みに数秒かかります。</p>
+        <p class="error" id="startError" hidden></p>
+      </div>
+    </div>
+  </main>
+
+  <aside class="panel" aria-label="識別結果と設定">
+    <div class="total"><strong id="totalCount">0</strong><span>件を検出中</span></div>
+
+    <table>
+      <thead><tr><th>種類</th><th class="num">いま</th><th class="num">最大</th></tr></thead>
+      <tbody id="countBody"></tbody>
+    </table>
+    <p class="empty" id="emptyMsg">まだ何も検出していません。カメラを対象に向けてください。</p>
+
+    <div class="controls">
+      <label>数える対象
+        <select id="groupSelect">
+          <option value="desk" selected>机の上（カップ・スマホ・本）</option>
+          <option value="all">すべて</option>
+          <option value="person">人だけ</option>
+          <option value="vehicle">乗り物</option>
+          <option value="animal">動物</option>
+          <option value="item">日用品・家具</option>
+        </select>
+      </label>
+      <label>判定の厳しさ：<span id="thresholdVal">50</span>%以上
+        <input type="range" id="threshold" min="20" max="90" step="5" value="50">
+      </label>
+      <div class="row">
+        <button id="flipBtn">カメラ切替</button>
+        <button id="pauseBtn">一時停止</button>
+      </div>
+      <div class="row">
+        <button id="snapBtn">画像を保存</button>
+        <button id="csvBtn">記録をCSVで保存</button>
+        <button id="resetBtn">最大値をリセット</button>
+      </div>
+      <p class="empty" id="logInfo">記録：0件（1秒ごとに件数を記録）</p>
+    </div>
+
+    <section class="controls" aria-labelledby="evalTitle">
+      <h2 id="evalTitle" style="font-size:18px;margin:8px 0 0;">評価：正解と比べる</h2>
+      <p class="empty" style="margin:0;">机の上の実際の個数を入れて「記録」を押すと、AIの数と比べて正解率を出します。</p>
+      <div class="row" id="truthInputs"></div>
+      <div class="row">
+        <button id="evalBtn">この画面を記録</button>
+        <button id="evalCsvBtn">評価結果をCSVで保存</button>
+      </div>
+      <table>
+        <thead><tr><th>種類</th><th class="num">正解</th><th class="num">試行</th><th class="num">正解率</th></tr></thead>
+        <tbody id="evalBody"></tbody>
+      </table>
+      <p class="total" style="margin:0;"><strong id="evalOverall" style="font-size:32px;">–</strong><span id="evalJudge">全体の正解率（目標80%）</span></p>
+    </section>
+  </aside>
+
+<script type="module">
+import { ObjectDetector, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite";
+
+// COCOの英語ラベル → 日本語
+const JA = {
+  person:"人", bicycle:"自転車", car:"車", motorcycle:"バイク", airplane:"飛行機", bus:"バス", train:"電車", truck:"トラック", boat:"船",
+  "traffic light":"信号機", "fire hydrant":"消火栓", "stop sign":"一時停止標識", "parking meter":"パーキングメーター", bench:"ベンチ",
+  bird:"鳥", cat:"猫", dog:"犬", horse:"馬", sheep:"羊", cow:"牛", elephant:"象", bear:"熊", zebra:"シマウマ", giraffe:"キリン",
+  backpack:"リュック", umbrella:"傘", handbag:"ハンドバッグ", tie:"ネクタイ", suitcase:"スーツケース", frisbee:"フリスビー", skis:"スキー板",
+  snowboard:"スノーボード", "sports ball":"ボール", kite:"凧", "baseball bat":"バット", "baseball glove":"グローブ", skateboard:"スケボー",
+  surfboard:"サーフボード", "tennis racket":"テニスラケット", bottle:"ボトル", "wine glass":"ワイングラス", cup:"カップ", fork:"フォーク",
+  knife:"ナイフ", spoon:"スプーン", bowl:"ボウル", banana:"バナナ", apple:"りんご", sandwich:"サンドイッチ", orange:"オレンジ",
+  broccoli:"ブロッコリー", carrot:"にんじん", "hot dog":"ホットドッグ", pizza:"ピザ", donut:"ドーナツ", cake:"ケーキ", chair:"椅子",
+  couch:"ソファ", "potted plant":"鉢植え", bed:"ベッド", "dining table":"テーブル", toilet:"トイレ", tv:"テレビ", laptop:"ノートPC",
+  mouse:"マウス", remote:"リモコン", keyboard:"キーボード", "cell phone":"スマホ", microwave:"電子レンジ", oven:"オーブン",
+  toaster:"トースター", sink:"シンク", refrigerator:"冷蔵庫", book:"本", clock:"時計", vase:"花瓶", scissors:"はさみ",
+  "teddy bear":"ぬいぐるみ", "hair drier":"ドライヤー", toothbrush:"歯ブラシ"
+};
+const GROUPS = {
+  person: ["person"],
+  vehicle: ["bicycle","car","motorcycle","airplane","bus","train","truck","boat"],
+  animal: ["bird","cat","dog","horse","sheep","cow","elephant","bear","zebra","giraffe"],
+};
+GROUPS.item = Object.keys(JA).filter(k => !Object.values(GROUPS).flat().includes(k));
+GROUPS.desk = ["cup", "cell phone", "book"];
+
+const $ = id => document.getElementById(id);
+const video = $("video"), overlay = $("overlay"), ctx = overlay.getContext("2d");
+
+let detector = null, stream = null, facing = "environment";
+let running = false, paused = false, lastVideoTime = -1;
+let threshold = 0.5, group = "desk";
+let lastDetections = [], lastRaw = [];
+const maxCounts = {};
+const log = [];
+let lastLogAt = 0, frames = 0, fpsAt = performance.now();
+
+const ja = name => JA[name] || name;
+const inGroup = name => group === "all" || GROUPS[group].includes(name);
+
+async function loadDetector() {
+  const vision = await FilesetResolver.forVisionTasks(WASM_URL);
+  const opts = delegate => ({
+    baseOptions: { modelAssetPath: MODEL_URL, delegate },
+    runningMode: "VIDEO", scoreThreshold: 0.2, maxResults: 30,
+  });
+  try { return await ObjectDetector.createFromOptions(vision, opts("GPU")); }
+  catch { return await ObjectDetector.createFromOptions(vision, opts("CPU")); }
+}
+
+async function startCamera() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+  });
+  video.srcObject = stream;
+  video.style.transform = facing === "user" ? "scaleX(-1)" : "";
+  await video.play();
+}
+
+// object-fit: contain の表示位置を計算
+function videoRect() {
+  const cw = overlay.clientWidth, ch = overlay.clientHeight;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const s = Math.min(cw / vw, ch / vh);
+  return { s, x: (cw - vw * s) / 2, y: (ch - vh * s) / 2, w: vw * s };
+}
+
+function draw(dets) {
+  const dpr = window.devicePixelRatio || 1;
+  const cw = overlay.clientWidth, ch = overlay.clientHeight;
+  if (overlay.width !== cw * dpr || overlay.height !== ch * dpr) {
+    overlay.width = cw * dpr; overlay.height = ch * dpr;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+  if (!video.videoWidth) return;
+  const r = videoRect();
+  const box = getComputedStyle(document.documentElement).getPropertyValue("--box").trim() || "#F2C230";
+  ctx.lineWidth = 3;
+  ctx.font = "bold 14px 'Zen Kaku Gothic New', sans-serif";
+  for (const d of dets) {
+    const b = d.boundingBox;
+    let x = r.x + b.originX * r.s;
+    if (facing === "user") x = r.x + r.w - (b.originX + b.width) * r.s; // 鏡像に合わせる
+    const y = r.y + b.originY * r.s, w = b.width * r.s, h = b.height * r.s;
+    ctx.strokeStyle = box;
+    ctx.strokeRect(x, y, w, h);
+    const label = `${ja(d.name)} ${Math.round(d.score * 100)}%`;
+    const tw = ctx.measureText(label).width + 12;
+    ctx.fillStyle = box;
+    ctx.fillRect(x - 1.5, Math.max(0, y - 24), tw, 24);
+    ctx.fillStyle = "#13212B";
+    ctx.fillText(label, x + 5, Math.max(17, y - 7));
+  }
+}
+
+function updatePanel(dets) {
+  const counts = {};
+  for (const d of dets) counts[d.name] = (counts[d.name] || 0) + 1;
+  for (const [k, v] of Object.entries(counts)) maxCounts[k] = Math.max(maxCounts[k] || 0, v);
+
+  $("totalCount").textContent = dets.length;
+  const names = Object.keys(maxCounts).filter(inGroup)
+    .sort((a, b) => (counts[b] || 0) - (counts[a] || 0) || maxCounts[b] - maxCounts[a]);
+  $("emptyMsg").hidden = names.length > 0;
+  $("countBody").innerHTML = names.map(n =>
+    `<tr><td>${ja(n)}</td><td class="num">${counts[n] || 0}</td><td class="num">${maxCounts[n]}</td></tr>`
+  ).join("");
+
+  const now = Date.now();
+  if (now - lastLogAt >= 1000) {
+    lastLogAt = now;
+    log.push({ time: new Date(now).toISOString(), total: dets.length, counts });
+    $("logInfo").textContent = `記録：${log.length}件（1秒ごとに件数を記録）`;
+  }
+}
+
+function loop() {
+  if (!running) return;
+  if (!paused && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    const res = detector.detectForVideo(video, performance.now());
+    lastRaw = res.detections
+      .map(d => ({ name: d.categories[0].categoryName, score: d.categories[0].score, boundingBox: d.boundingBox }));
+    lastDetections = lastRaw.filter(d => d.score >= threshold && inGroup(d.name));
+    draw(lastDetections);
+    updatePanel(lastDetections);
+    frames++;
+  }
+  const now = performance.now();
+  if (now - fpsAt >= 1000) {
+    $("fps").textContent = `${Math.round(frames * 1000 / (now - fpsAt))} fps`;
+    frames = 0; fpsAt = now;
+  }
+  requestAnimationFrame(loop);
+}
+
+$("startBtn").addEventListener("click", async () => {
+  const btn = $("startBtn"), err = $("startError");
+  btn.disabled = true; err.hidden = true;
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("このページは https または localhost で開く必要があります。");
+    }
+    btn.textContent = "モデルを読み込み中…";
+    detector = detector || await loadDetector();
+    btn.textContent = "カメラを起動中…";
+    await startCamera();
+    $("startScreen").hidden = true;
+    $("status").textContent = "識別中";
+    running = true;
+    requestAnimationFrame(loop);
+  } catch (e) {
+    err.hidden = false;
+    err.textContent = e.name === "NotAllowedError"
+      ? "カメラの使用が許可されていません。ブラウザの設定でカメラを許可してから、もう一度押してください。"
+      : `起動できませんでした：${e.message}`;
+    btn.disabled = false; btn.textContent = "もう一度試す";
+  }
+});
+
+$("flipBtn").addEventListener("click", async () => {
+  if (!running) return;
+  facing = facing === "environment" ? "user" : "environment";
+  try { await startCamera(); } catch (e) { $("status").textContent = "切替に失敗しました"; }
+});
+
+$("pauseBtn").addEventListener("click", () => {
+  if (!running) return;
+  paused = !paused;
+  paused ? video.pause() : video.play();
+  $("pauseBtn").textContent = paused ? "再開" : "一時停止";
+  $("status").textContent = paused ? "一時停止中" : "識別中";
+});
+
+$("threshold").addEventListener("input", e => {
+  threshold = e.target.value / 100;
+  $("thresholdVal").textContent = e.target.value;
+});
+$("groupSelect").addEventListener("change", e => { group = e.target.value; });
+$("resetBtn").addEventListener("click", () => { for (const k in maxCounts) delete maxCounts[k]; updatePanel(lastDetections); });
+
+// ---- 評価 ----
+const EVAL_ITEMS = GROUPS.desk;
+const evalLog = [];
+$("truthInputs").innerHTML = EVAL_ITEMS.map(n =>
+  `<label class="truth">${ja(n)}<input type="number" min="0" value="0" inputmode="numeric" data-name="${n}"></label>`
+).join("");
+
+function renderEval() {
+  const rows = EVAL_ITEMS.map(n => {
+    const ok = evalLog.filter(e => e.detected[n] === e.truth[n]).length;
+    return { n, ok, total: evalLog.length };
+  });
+  $("evalBody").innerHTML = rows.map(r =>
+    `<tr><td>${ja(r.n)}</td><td class="num">${r.ok}</td><td class="num">${r.total}</td><td class="num">${r.total ? Math.round(r.ok / r.total * 100) + "%" : "–"}</td></tr>`
+  ).join("");
+  const ok = rows.reduce((a, r) => a + r.ok, 0), all = rows.reduce((a, r) => a + r.total, 0);
+  const rate = all ? Math.round(ok / all * 100) : null;
+  $("evalOverall").textContent = rate === null ? "–" : rate + "%";
+  $("evalJudge").textContent = rate === null ? "全体の正解率（目標80%）"
+    : `全体の正解率（${evalLog.length}枚・目標80%に${rate >= 80 ? "到達" : "未到達"}）`;
+}
+renderEval();
+
+$("evalBtn").addEventListener("click", () => {
+  if (!running) return;
+  // 判定の厳しさは反映、対象の絞り込みは無視して3種類を数える
+  const detected = {}, truth = {};
+  for (const n of EVAL_ITEMS) detected[n] = 0;
+  for (const d of lastRaw) if (d.score >= threshold && n_in(d.name)) detected[d.name]++;
+  document.querySelectorAll("#truthInputs input").forEach(i => truth[i.dataset.name] = Number(i.value) || 0);
+  evalLog.push({ time: new Date().toISOString(), threshold, detected, truth });
+  renderEval();
+});
+function n_in(name) { return EVAL_ITEMS.includes(name); }
+
+$("evalCsvBtn").addEventListener("click", () => {
+  const head = ["時刻", "判定の厳しさ", ...EVAL_ITEMS.flatMap(n => [`${ja(n)}_正解`, `${ja(n)}_AI`, `${ja(n)}_一致`])];
+  const rows = evalLog.map(e => [e.time, e.threshold, ...EVAL_ITEMS.flatMap(n => [e.truth[n], e.detected[n], e.truth[n] === e.detected[n] ? 1 : 0])].join(","));
+  download(new Blob(["\uFEFF" + [head.join(","), ...rows].join("\n")], { type: "text/csv" }), `eval-${stamp()}.csv`);
+});
+
+function download(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+
+$("snapBtn").addEventListener("click", () => {
+  if (!video.videoWidth) return;
+  const c = document.createElement("canvas");
+  c.width = overlay.width; c.height = overlay.height;
+  const g = c.getContext("2d");
+  const dpr = window.devicePixelRatio || 1, r = videoRect();
+  g.fillStyle = "#000"; g.fillRect(0, 0, c.width, c.height);
+  g.save();
+  if (facing === "user") { g.translate(c.width, 0); g.scale(-1, 1); }
+  g.drawImage(video, r.x * dpr, r.y * dpr, r.w * dpr, video.videoHeight * r.s * dpr);
+  g.restore();
+  g.drawImage(overlay, 0, 0);
+  c.toBlob(b => download(b, `detect-${stamp()}.png`));
+});
+
+$("csvBtn").addEventListener("click", () => {
+  const names = [...new Set(log.flatMap(l => Object.keys(l.counts)))];
+  const header = ["時刻", "合計", ...names.map(ja)].join(",");
+  const rows = log.map(l => [l.time, l.total, ...names.map(n => l.counts[n] || 0)].join(","));
+  const csv = "\uFEFF" + [header, ...rows].join("\n");
+  download(new Blob([csv], { type: "text/csv" }), `detect-log-${stamp()}.csv`);
+});
+</script>
+</body>
+</html>
